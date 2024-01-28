@@ -1,9 +1,18 @@
 package com.practice.weatherapp
 
-import androidx.appcompat.app.AppCompatActivity
+import android.location.Geocoder
 import android.os.Bundle
-import android.widget.SearchView
+import android.util.Log
+import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.widget.SearchView
+import androidx.lifecycle.lifecycleScope
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import com.practice.weatherapp.databinding.ActivityMainBinding
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import retrofit2.Call
 import retrofit2.Callback
 import retrofit2.Response
@@ -16,19 +25,47 @@ import java.util.Locale
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
+    private val apiKey = "033e39a225ad2f0bb2c5e616f5c86965"
+
+    private lateinit var recyclerView: RecyclerView
+    private lateinit var adapter: WeatherAdapter
+    private var dataList: ArrayList<DataClass> = ArrayList()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        recyclerView = findViewById(R.id.rv_hourly_weather)
+        recyclerView.layoutManager =
+            LinearLayoutManager(this@MainActivity, LinearLayoutManager.HORIZONTAL, false)
+
+        adapter = WeatherAdapter(dataList)
+        recyclerView.adapter = adapter
+
+        fetchHourlyData(18.5204, 73.8567)
         fetchWeatherData("Pune")
         searchCity()
 
     }
 
+    private fun updateUI(hourlyWeatherData: HourlyWeatherData) {
+
+        dataList.clear() // Clear existing data before adding new data
+
+        for (hourlyForecast in hourlyWeatherData.hourly) {
+            val timestamp = time(hourlyForecast.dt)
+            val temperature = hourlyForecast.temp - 273.15
+            val temperatureCelsius = String.format("%.2f°C", temperature)
+
+            dataList.add(DataClass(timestamp, temperatureCelsius))
+        }
+        adapter.notifyDataSetChanged() // Notify the adapter that the data has changed
+    }
+
     private fun searchCity() {
         val searchView = binding.searchView
+
         searchView.setOnQueryTextListener(object : SearchView.OnQueryTextListener {
             override fun onQueryTextSubmit(query: String?): Boolean {
                 if (query != null) {
@@ -43,6 +80,16 @@ class MainActivity : AppCompatActivity() {
         })
     }
 
+    private fun getLatLong(cityName: String) {
+        val gc = Geocoder(this, Locale.getDefault())
+
+        val addresses = gc.getFromLocationName(cityName, 2)
+        val address = addresses?.get(0)
+
+        fetchHourlyData(address!!.latitude, address.longitude)
+
+    }
+
     private fun fetchWeatherData(cityName: String) {
         val retrofit = Retrofit.Builder()
             .addConverterFactory(GsonConverterFactory.create())
@@ -50,7 +97,7 @@ class MainActivity : AppCompatActivity() {
             .build().create(ApiInterface::class.java)
 
         val response =
-            retrofit.getWeatherData(cityName, "033e39a225ad2f0bb2c5e616f5c86965", "metric")
+            retrofit.getWeatherData(cityName, apiKey, "metric")
         response.enqueue(object : Callback<WeatherApp> {
             override fun onResponse(call: Call<WeatherApp>, response: Response<WeatherApp>) {
                 val responseBody = response.body()
@@ -62,24 +109,18 @@ class MainActivity : AppCompatActivity() {
                     val sunSet = responseBody.sys.sunset.toLong()
                     val seaLevel = responseBody.main.pressure
                     val condition = responseBody.weather.firstOrNull()?.main ?: "unknown"
-                    val maxTemp = responseBody.main.temp_max
-                    val minTemp = responseBody.main.temp_min
 
                     binding.tvTemperature.text = "$temperature °C"
                     binding.tvWeather.text = condition
-                    binding.tvMaxTemp.text = "Max : $maxTemp  °C"
-                    binding.tvMinTemp.text = "Min : $minTemp  °C"
                     binding.tvHumidity.text = "$humidity %"
                     binding.tvWindSpeed.text = "$windSpeed m/s"
                     binding.tvSunrise.text = "${time(sunRise)}"
                     binding.tvSunset.text = "${time(sunSet)}"
                     binding.tvSea.text = "$seaLevel hPa"
                     binding.tvCondition.text = condition
-                    binding.tvDay.text = dayName(System.currentTimeMillis())
-                    binding.tvDate.text = date()
                     binding.tvCityName.text = "$cityName"
 
-                    setWeatherBackgroundImage(condition)
+                    getLatLong(cityName)
 
                 }
             }
@@ -91,34 +132,18 @@ class MainActivity : AppCompatActivity() {
         })
     }
 
-    private fun setWeatherBackgroundImage(condition: String) {
-        when (condition) {
-            "Clear Sky", "Sunny", "Clear" -> {
-                binding.root.setBackgroundResource(R.drawable.sunny_background)
-                binding.lottieAnimationView.setAnimation(R.raw.sun)
-            }
+    private fun fetchHourlyData(latitude: Double, longitude: Double) {
 
-            "Partly Clouds", "Clouds", "Overcast", "Mist", "Foggy" -> {
-                binding.root.setBackgroundResource(R.drawable.cloud_background)
-                binding.lottieAnimationView.setAnimation(R.raw.cloud)
-            }
+        val weatherService = WeatherService()
 
-            "Light Rain", "Drizzle", "Moderate Rain", "Showers", "Heavy Rain" -> {
-                binding.root.setBackgroundResource(R.drawable.rain_background)
-                binding.lottieAnimationView.setAnimation(R.raw.rain)
+        lifecycleScope.launch(Dispatchers.Main) {
+            val hourlyWeatherData = withContext(Dispatchers.IO) {
+                weatherService.getHourlyWeatherData(latitude, longitude, apiKey)
             }
-
-            "Light Snow", "Moderate Snow", "Heavy Snow", "Blizzard" -> {
-                binding.root.setBackgroundResource(R.drawable.snow_background)
-                binding.lottieAnimationView.setAnimation(R.raw.snow)
-            }
-
-            else -> {
-                binding.root.setBackgroundResource(R.drawable.sunny_background)
-                binding.lottieAnimationView.setAnimation(R.raw.sun)
+            if (hourlyWeatherData != null) {
+                updateUI(hourlyWeatherData)
             }
         }
-        binding.lottieAnimationView.playAnimation()
     }
 
     fun date(): String {
@@ -128,12 +153,12 @@ class MainActivity : AppCompatActivity() {
 
     fun time(timestamp: Long): String {
         val sdf = SimpleDateFormat("HH:mm", Locale.getDefault())
-        return sdf.format((Date(timestamp*1000)))
+        return sdf.format((Date(timestamp * 1000)))
     }
+
     fun dayName(timestamp: Long): String {
         val sdf = SimpleDateFormat("EEEE", Locale.getDefault())
         return sdf.format((Date()))
     }
-
 
 }
