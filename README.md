@@ -16,7 +16,7 @@
 
 ## Libraries Used📚
 <ul>
-  <li>Lotti Animation</li>
+  <li>Lottie Animation</li>
   <li>Retrofit</li>
   <li>okhttp3</li>
 </ul>
