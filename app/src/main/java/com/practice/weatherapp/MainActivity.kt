@@ -25,7 +25,7 @@ import java.util.Locale
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
-    private val apiKey = "033e39a225ad2f0bb2c5e616f5c86965"
+    private val apiKey = "API_KEY"
 
     private lateinit var recyclerView: RecyclerView
     private lateinit var adapter: WeatherAdapter
